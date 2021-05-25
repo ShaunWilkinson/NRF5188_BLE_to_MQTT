@@ -1,34 +1,34 @@
 /*
 Author:  Eric Tsai, 2017
 License:  CC-BY-SA, https://creativecommons.org/licenses/by-sa/2.0/
-File: Ethernet_Gateway.ino
+
 Purpose:  Gateway for JSON serial data to MQTT via ESP8266 wifi link
+
 Input:  Expected JSON format via uart
 {"mac":"c2f154bb0af9","rssi":-55,"volt":3.05,"sensor":1, "key":value}
 {"mac":"cow2","rssi":-109,"volt":3.61,"lat":45.055761, "long":-92.980961}
+
 Output:
 Iterates through the key:value pairs and publishes in this form:
 /BLE/<loc>/<mac>/<key>/ <value>
 /ble/livingroom/c2f154bb0af9/volt 3.05
 /ble/livingroom/c2f154bb0af9/rssi/ -55
-/LORA/farmhouse/cow2/lat 45.055761
-/LORA/farmhouse/cow2/long -92.980961
-Hardware:
-Tested on ESP8266, various flavors
-UART:  TX pin from wireless module to GPIO3/RXD0 on ESP8266
-    For nRF51822, P0.09 (but check code, it's configurable)
-    For LoRa gateway, TX1 / PD1
-Handshake Pin:  See definition
+
 Changes:  ctrl-F "**CHANGE**"
 1)  IP address of MQTT broker
 2)  <loc> designation, persumably unique per gateway
 3)  SSID and password
+
 Notes:  To test by subscribing to all topics
 mosquitto_sub -h localhost -v -t '#'
 */
 
 /*
- * Modified by Shaun Wilkinson 19/05/2021 to update to latest ArduinoJSON6 standard
+Modified By: Shaun Wilkinson, 2021
+Changes -
+Removed all references to existing temperature reporting and reed functionality.
+Upgraded ArduinoJson from 5 to latest 6.
+Completely rewritten localParseJson function to handle multiple JsonPair value types
  */
 
 #include <ESP8266WiFi.h>
@@ -46,17 +46,8 @@ const char* password = "fe5a954c8a";
 //"**CHANGE**" MQTT server IP address
 const char* mqtt_server = "192.168.1.75";  //mqtt server server 2.3
 
-//"**CHANGE**" debug output
-#define MyDebug 0   //0=no debug, 1=deeebug
-
-/*
-**CHANGE** mqtt_name[] used as part of topic name
-/ble/MQTT_NAME/mac/rssi`
-/ble/MQTT_NAME/mac/volt
-*/
-const char mqtt_name[]="Study";
+const char mqtt_name[]="Study"; // Used as part of the topic
 //const char mqtt_name[]="livingroom";
-//const char mqtt_name[]="basement";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -64,10 +55,12 @@ long lastMsg = 0;
 char msg[50];
 int value = 0;
 
-
 IPAddress server(192, 168, 2, 53);
 unsigned long heartbeat_millis=0;
 int heartbeat_cnt=0;
+
+//"**CHANGE**" debug output
+#define MyDebug 1   //0=no debug, 1=deeebug
 
 const int pinHandShake = 4; //handshake pin, esp8266 GPIO4/D2
 
@@ -78,8 +71,7 @@ bool conn_status;
 // Callback function header
 void callback(char* topic, byte* payload, unsigned int length);
 
-
-const int serialBufSize = 100;      //size for at least the size of incoming JSON string
+const int serialBufSize = 120;      //size for at least the size of incoming JSON string
 static char serialbuffer[serialBufSize];  // {"mac":c2f154bb0af9,"rssi":-55,"volt":3.05,"mag":1}
 static char mytopic[120];  //MQTT topic string size, must be less than size declared.
 //todo: add error checking for mqtt msg lengths
@@ -118,10 +110,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
   Serial.println();
 
-
-
-
-  
   char message_buff[60]; //payload string
   // create string for payload
   int i=0;
@@ -147,19 +135,6 @@ void reconnect() {
       Serial.println("connected");
       // Once connected, publish an announcement...
       client.publish("outTopic", "hello world");
-      // ... and resubscribe
-      //client.subscribe("inTopic");
-      //client.subscribe("50C51C570B00");   //switched ble
-      //client.subscribe("req_door_open");
-      //client.subscribe("req_door_close");
-      //client.subscribe("mq_snow_red");
-      //client.subscribe("mq_snow_green");
-      //client.subscribe("mq_snow_blue");
-      //client.subscribe("mq_tree_red");
-      //client.subscribe("mq_tree_green");
-      //client.subscribe("mq_tree_blue");
-
-
       
     } else {
       Serial.print("failed, rc=");
@@ -183,7 +158,6 @@ void setup() {
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback);
 }
-
 
 
 //stealing this code from
@@ -213,16 +187,14 @@ int readline(int readch, char *buffer, int len)
   return -1;
 }
 
-
 //json iterator that parses char* and publish each key-value pair as mqtt data
 void localParseJson(char *mybuf)
 {
 
   //JSON parsing
-  //JSON object exists in this scope, routine should execute atomatically no interrupts
-  //If software serial is used, and parsing is interrupted, json object still be valid?
-  StaticJsonDocument<200> jsonBuffer;
-  auto error = deserializeJson(jsonBuffer, mybuf);
+  StaticJsonDocument<200> doc;
+  auto error = deserializeJson(doc, mybuf);
+  
   /*
     Incoming uart:
     mac:c2f154bb0af9,rssi:-55,volt:3.05,mag:1
@@ -231,6 +203,7 @@ void localParseJson(char *mybuf)
     /ble/livingroom/c2f154bb0af9/rssi -55
     /ble/livingroom/c2f154bb0af9/volt 3
     /ble/livingroom/c2f154bb0af9/mag 1
+
   1)  count # fields in after MAC
   2)  concat "ble"/"MAC"/+iterate field
   3)  capture data to publish
@@ -238,11 +211,10 @@ void localParseJson(char *mybuf)
   if (!error)
   {
     // Parsing success, valid json
-    //todo:  it's too easy to forget mytopic size, not checking for size when string being assembled.
-    //    add error checking and improve readability
 
+    JsonObject root = doc.as<JsonObject>();
+      
     int topic_char_index=0;
-    // mytopic[i] = '\0'; make sure null terminate mytopic
   
     //construct the first part of the topic name, which is just /ble/mac
     mytopic[0]='/'; topic_char_index++;
@@ -278,11 +250,12 @@ void localParseJson(char *mybuf)
     
     //set string pointer to JSON Value containing the key "mac"
     // so it's pointing to "mac":c2f154bb0af9
-    const char* mac_name = jsonBuffer["mac"];
+    const char* mac_name = doc["mac"];
     
     #if MyDebug
-    Serial.println("mac name is");
-    Serial.println(mac_name);
+    Serial.print("mac name is ");
+    Serial.print(mac_name);
+    Serial.print("\r\n");
     #endif
     
     int sizeofff = strlen(mac_name);    //returns exactly number of characters in mac_name.  Doesn't add 1 like sizeof
@@ -318,11 +291,7 @@ void localParseJson(char *mybuf)
     //as we iterate through the keys in json, need a marker for char[] index
     //up to the MAC address:  "/ble/livingroom/c2f154bb0af9/"  <---- here
     int topic_char_index_marker = topic_char_index;
-
-    // Required so as to loop through the new ArduinoJson6 standard deserialized JSon
-    JsonObject root = jsonBuffer.as<JsonObject>();
-
-    // Converted from old C++98 format to C++11 Syntax
+    
     for (JsonPair kv : root)
     {
       topic_char_index = topic_char_index_marker; //reset index to just after MAC location
@@ -330,24 +299,9 @@ void localParseJson(char *mybuf)
        /ble/livingroom/c2f154bb0af9/  <---- here
       */
 
-      #if MyDebug
-      Serial.print("iterator::");
-      Serial.print(kv.key().c_str());
-      Serial.print(",");
-      Serial.println(kv.value().as<char*>());
-      #endif
-      //client.publish(i->key,i->value.asString());
-
       //copy string for key into the prepared topic string
       const char* key_name = kv.key().c_str();  //funny, key_name has to be const to compile in ESP8266. 
       int keysize = strlen(key_name);
-
-      #if MyDebug
-      Serial.print("key size:  ");
-      Serial.print(keysize);
-      Serial.print(",        topic_char_index:  ");
-      Serial.println(topic_char_index);
-      #endif
       
       for (int j=0; j<keysize; j++)
       {
@@ -355,9 +309,9 @@ void localParseJson(char *mybuf)
         
       }
       
-      /* note that topic_char_index is sitting at position after rss"i"
-       *  /ble/c2f154bb0af9/rssi   <----- rssi, volt, etc...
-       */
+      // note that topic_char_index is sitting at position after rss"i"
+       //  /ble/c2f154bb0af9/rssi   <----- rssi, volt, etc...
+       //
 
       mytopic[topic_char_index] = '\0';  //terminate string w/ null
 
@@ -367,10 +321,33 @@ void localParseJson(char *mybuf)
       Serial.println("printing entire mytopic:");
       Serial.print(mytopic);
       #endif
-
       
       //mqtt publish relies a null terminated string for topic names
-      client.publish(mytopic,kv.value().as<char*>());
+      JsonVariant value = kv.value();
+      const char valueType = getType(value);
+      
+      // Get variant type then publish it
+      // This is required as attempting to cast values as char* fails and produces a null value when the value isn't char*
+      switch(valueType) {
+        case 'c':
+          client.publish(mytopic, value.as<char*>());
+          break;
+        case 'i': {
+            char b[5];
+            String str;
+            str = String(value.as<int>());
+            str.toCharArray(b, 5);
+            client.publish(mytopic, b);
+          }
+          break;
+        case 'f': {
+            char result[5];
+            dtostrf(value.as<float>(), 5, 2, result);
+            client.publish(mytopic, result); 
+          }
+          break;
+      }
+      
     }//end iterator
 
   }//end if json parsed successful
@@ -378,12 +355,21 @@ void localParseJson(char *mybuf)
   {
     client.publish(mqtt_name, "bad json format");
     client.publish(mqtt_name, mybuf);
-    Serial.println("--->bad json:");
     Serial.println(mybuf);
   } //failed json parse
 
   digitalWrite(LED, HIGH);  //LED off
 } //end routine localParseJson
+
+// Simple function that returns a char which indicates the type of value being passed
+char getType(JsonVariant jv) {
+  if(jv.is<char*>())
+    return 'c';
+  if(jv.is<int>())
+    return 'i';
+  if(jv.is<float>())
+    return 'f';
+}
 
 
 //*****************************
@@ -451,4 +437,5 @@ void loop() {
     
   } //end heartbeat
 } //end loop
+
 
