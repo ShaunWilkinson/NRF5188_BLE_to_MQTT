@@ -96,10 +96,12 @@ def _parse_mqtt_message(topic, payload):
 
 
 def _send_sensor_data_to_sqlite(sensor_data):
+    print(sensor_data)
     sql_query = 'INSERT INTO {} (submitTime, gateway, tagMac, rssi, volt, tmr, xcnt) \n' \
         ' VALUES ({}, {}, {}, {}, {}, {}, {})' \
         .format(TABLE_NAME, sensor_data[0].get_submit_time(), "'{}'".format(sensor_data[0].get_gateway()), "'{}'".format(sensor_data[0].get_tag()), sensor_data[1].get_value(), sensor_data[2].get_value(), sensor_data[3].get_value(), sensor_data[4].get_value())
     
+    mqtt_buffer.clear()
     print(sql_query)
     dbConnection.execute(sql_query)
     dbConnection.commit()
