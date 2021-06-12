@@ -14,9 +14,6 @@ MQTT_TOPIC = '/yyy/+/+/+' #/yyy/Study/f2734bec8248/rssi
 MQTT_REGEX = '/yyy/([^/]+)/([^/]+)/([^/]*)'
 MQTT_CLIENT_ID = 'PIServer'
 
-mqtt_buffer = [] #Holds a record of up to 6 MQTT messages that make up all the data that an individual tag throws out
-streaming = False # Whether to continue streaming messages to buffer
-
 dbConnection = sqlite3.connect(DB_NAME); # Connect to the SQLite database
 # Create the table if it doesn't already exist
 dbConnection.execute('CREATE TABLE IF NOT EXISTS tag_data ' \
@@ -41,7 +38,7 @@ class tag_data:
         return self.tag_name
     
     def get_measure(self):
-        return self.measure
+        return self.measure_name
     
     def get_value(self):
         return self.value
@@ -75,41 +72,25 @@ def _parse_mqtt_message(topic, payload):
         measure_name = match.group(3)
         value = payload.strip()
         
-        global streaming
-        
-        if measure_name == "BEA":
-            ## TODO - probably need to reformat how button pressed data is passed through
+        if (measure_name == 'mac'):
             return None
-        
-        if measure_name == "xcnt":
-            streaming = False
-            mqtt_buffer.append(tag_data(gateway_name, tag_name, measure_name, value))
-            return mqtt_buffer
-        
-        if measure_name == "mac" or streaming == True:
-            streaming = True
-            mqtt_buffer.append(tag_data(gateway_name, tag_name, measure_name, value))
-            return None
-        
+        else:
+            return tag_data(gateway_name, tag_name, measure_name, value)
+
     else:
         return None
 
 
 def _send_sensor_data_to_sqlite(sensor_data):
-    print(sensor_data)
-    sql_query = 'INSERT INTO {} (submitTime, gateway, tagMac, rssi, volt, tmr, xcnt) \n' \
-        ' VALUES ({}, {}, {}, {}, {}, {}, {})' \
-        .format(TABLE_NAME, sensor_data[0].get_submit_time(), "'{}'".format(sensor_data[0].get_gateway()), "'{}'".format(sensor_data[0].get_tag()), sensor_data[1].get_value(), sensor_data[2].get_value(), sensor_data[3].get_value(), sensor_data[4].get_value())
+    print(sensor_data.to_string())
+    sql_query = 'INSERT INTO {} (submitTime, gateway, tagMac, measureName, value) \n' \
+        ' VALUES ({}, {}, {}, {}, {})' \
+        .format(TABLE_NAME, sensor_data.get_submit_time(), "'{}'".format(sensor_data.get_gateway()), "'{}'".format(sensor_data.get_tag()), "'{}'".format(sensor_data.get_measure()), sensor_data.get_value())
     
-    mqtt_buffer.clear()
     print(sql_query)
     dbConnection.execute(sql_query)
     dbConnection.commit()
     print("Entered record into db")
-        
-    #TODO save to SQLite
- 
-
 
 def main():
     mqtt_client = mqtt.Client(MQTT_CLIENT_ID)
