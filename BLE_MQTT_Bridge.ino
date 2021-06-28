@@ -46,7 +46,7 @@ const char* password = "fe5a954c8a";
 //"**CHANGE**" MQTT server IP address
 const char* mqtt_server = "192.168.1.75";  //mqtt server server 2.3
 
-const char mqtt_name[]="Study"; // Used as part of the topic
+const char mqtt_name[]="TopLeft"; // Used as part of the topic
 //const char mqtt_name[]="livingroom";
 
 WiFiClient espClient;
@@ -85,6 +85,7 @@ void setup_wifi() {
   Serial.print("Connecting to ");
   Serial.println(ssid);
 
+  WiFi.mode(WIFI_STA); // Disable advertising it's own network
   WiFi.begin(ssid, password);
 
   while (WiFi.status() != WL_CONNECTED) {
@@ -437,5 +438,3 @@ void loop() {
     
   } //end heartbeat
 } //end loop
-
-
